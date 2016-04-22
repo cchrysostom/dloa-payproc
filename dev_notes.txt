@@ -1,0 +1,25 @@
+
+     $('document').ready(function () {
+         var txid = location.hash || "fc9220025df5f2bf76fcda8f66bced4c95846e136ff3f5ff4c36fede3a5e3fc5";
+         var data = window.searchAPI('media', 'txid', txid.replace(/^#/, ''));
+
+         console.log (txid, data);
+         window.doMountMediaBrowser('#media-browser', data[0]['media-data']);
+
+     })
+
+    
+devonjames [10:43 PM] 
+@cchrysostom: can you look into this https://gist.github.com/rubensayshi/35e45d4a843a8f9409e2 to see if it can do two things:
+1) provide a temporary btc payment address that will forward to another one at some threshold
+2) give us the ability to monitor the balance of the payment address so we can use it as the switch that deactivates the paywall
+
+[10:44] 
+basically, the payment address API that we were using for this: http://alexandria.media/music.html broke on Jan 1
+
+[10:45] 
+cuz the blockchain.info API changed
+
+[10:46] 
+so we can change our code to comply with their change, but it would still have a lot of issues, like the fact that it only forwards after ~$.40 has been received, which is a minor issue but still an issue - or we can use our own code, which sounds much more appealing
+
