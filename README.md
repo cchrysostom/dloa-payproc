@@ -47,6 +47,7 @@ $ curl "http://localhost:11306/payproc/api/receive?address=2N4ajxiM1xHc83mehV2LT
 Parameters:
 
 **address** _Address to receive coins_
+
 **amount** _Amount to send to address in BTC_
 
 Return:
