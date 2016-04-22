@@ -2,13 +2,13 @@
 
 ## Installation
 
-1. Install dependencies
+**Install dependencies**
 
 ```
 npm install blocktrail-sdk
 ```
 
-2. Copy the payproc.sample.conf file to payproc.conf and edit it.
+**Copy the payproc.sample.conf file to payproc.conf and edit it.**
 
 ```
 $ cp payproc.sample.conf payproc.conf
@@ -27,7 +27,7 @@ $ vi payproc.conf
 
 Adjust the settings to match your Blocktrail information and the server's port number.
 
-3. Run the server
+**Run the server**
 
 ```
 node payproc.js
@@ -46,12 +46,12 @@ $ curl "http://localhost:11306/payproc/api/receive?address=2N4ajxiM1xHc83mehV2LT
 
 Parameters:
 
-** address ** _Address to receive coins_
-** amount ** _Amount to send to address in BTC_
+**address** _Address to receive coins_
+**amount** _Amount to send to address in BTC_
 
 Return:
 
-** temporary address ** _The temporary address that can be shown to the buyer._
+**temporary address** _The temporary address that can be shown to the buyer._
 
 ### /payproc/api/receive
 
@@ -64,5 +64,5 @@ $ curl "http://localhost:11306/payproc/api/getreceivedbyaddress/2N4ajxiM1xHc83me
 
 Path Parameter:
 
-/payproc/api/getreceivedbyaddress/**BTC ADDRESS**  _The temporary payment address to monitor._
+/payproc/api/getreceivedbyaddress/**[BTC ADDRESS]**  _The temporary payment address to monitor._
 
