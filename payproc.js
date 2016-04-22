@@ -123,7 +123,7 @@ function addressUnconfirmedReceived(address, unconfRecvd) {
 
 	client.address(address).then(function(address) {
 		console.log("Unconfirmed: ", address.unconfirmed_received);
-		balanceCb(address.unconfirmed_received);
+		unconfRecvd(address.unconfirmed_received);
 	},
 	handleError);
 }
@@ -199,6 +199,7 @@ function handleReceiveCreateAddress(request, response) {
 function handleGetReceivedByAddress(request, response) {
 	let recvAddress = request.url.substring(URL_RECEIVED_BYADDRESS.length+1);
 	addressUnconfirmedReceived(recvAddress, function(balanceSatoshis) {
+		console.log(balanceSatoshis);
 		response.end(blocktrail.toBTC(balanceSatoshis));
 	}); 
 }
