@@ -54,7 +54,7 @@ Return:
 
 **temporary address** _The temporary address that can be shown to the buyer._
 
-### /payproc/api/receive
+### /payproc/api/getreceivedbyaddress
 
 To check the total amount of the unconfirmed balance of the given BTC address:
 
@@ -67,3 +67,6 @@ Path Parameter:
 
 /payproc/api/getreceivedbyaddress/**[BTC ADDRESS]**  _The temporary payment address to monitor._
 
+Return:
+
+The unconfirmed balance in BTC.
