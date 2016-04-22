@@ -27,7 +27,12 @@ $ vi payproc.conf
 
 Adjust the settings to match your Blocktrail information and the server's port number.
 
-3. 
+3. Run the server
+
+```
+node payproc.js
+```
+
 ## Usage
 
 ### /payproc/api/receive
