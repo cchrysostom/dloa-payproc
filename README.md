@@ -41,7 +41,7 @@ To generate a receive address for payments, use /payproc/api/receive.
 
 ```
 $ curl "http://localhost:11306/payproc/api/receive?address=2N4ajxiM1xHc83mehV2LTXk2Z65TAfc9MhX&amount=0.432"
-2N6dDdHGx24ss6AoAqjx8gnc2JQpETe1mBp
+{"input_address":"2N6dDdHGx24ss6AoAqjx8gnc2JQpETe1mBp"}
 ```
 
 Parameters:
