@@ -175,6 +175,7 @@ function forwardPayments() {
 
 // Main request handler
 function handleRequest(request, response){
+	console.log(request.url);
 	if (request.url.indexOf(URL_RECEIVE) == 0) {
 		handleReceiveCreateAddress(request, response);
 	} else if (request.url.indexOf(URL_RECEIVED_BYADDRESS) == 0) {
@@ -191,7 +192,14 @@ function handleReceiveCreateAddress(request, response) {
     let query = request.url.substring(request.url.indexOf("?")+1);
     let param = querystring.parse(query);
     receivePayment(param.address, param.amount, function(tempAddress) {
-        response.end(tempAddress[0]);
+        var addressObject = { input_address: tempAddress[0] };
+        var jsonData = JSON.stringify(addressObject);
+        response.setHeader('Access-Control-Allow-Origin', '*');
+        response.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+        response.setHeader('Content-Type', 'application/json');
+        response.statusCode = 200;
+        response.write(jsonData);
+        response.end();
     });
 
 }
@@ -199,7 +207,11 @@ function handleReceiveCreateAddress(request, response) {
 function handleGetReceivedByAddress(request, response) {
 	let recvAddress = request.url.substring(URL_RECEIVED_BYADDRESS.length+1);
 	addressUnconfirmedReceived(recvAddress, function(balanceSatoshis) {
-		console.log(balanceSatoshis);
-		response.end(blocktrail.toBTC(balanceSatoshis));
+            console.log(balanceSatoshis);
+            response.setHeader('Access-Control-Allow-Origin', '*');
+            response.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+            response.setHeader('Content-Type', 'text/plain');
+            response.statusCode = 200;
+            response.end(blocktrail.toBTC(balanceSatoshis));
 	}); 
 }
