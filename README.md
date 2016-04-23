@@ -1,4 +1,4 @@
-# dloa-payproc Alexandria Payment Processor
+# paywall-web Alexandria Payment Processor
 
 ## Installation
 
