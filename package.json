@@ -1,0 +1,23 @@
+{
+  "name": "paywall-web",
+  "version": "0.1.0",
+  "description": "Payment processing, paywall, for Alexandria",
+  "main": "payproc.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dloa/paywall-web.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/dloa/paywall-web/issues"
+  },
+  "homepage": "https://github.com/dloa/paywall-web#readme",
+  "dependencies": {
+    "blocktrail-sdk": "^2.0.0"
+  }
+}
