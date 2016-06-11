@@ -4,7 +4,9 @@
     Handles payments for Alexandria.
 
 */
-'use strict'
+/* jshint esversion: 6 */
+/* jshint node: true */
+"use strict";
 let blocktrail = require('blocktrail-sdk');
 let http = require('http');
 let querystring = require('querystring');
@@ -17,11 +19,15 @@ let WALLET_NAME = "";
 let WALLET_PASSWORD = "";
 let USE_TESTNET = true;
 let PORT = 11306;
+let DB_FILE = "payproc.db";
 
 const URL_RECEIVE = "/payproc/api/receive";
 const URL_RECEIVED_BYADDRESS = "/payproc/api/getreceivedbyaddress";
+const URL_PING = "/payproc/api/ping";
 
-const FWD_PAY_DELAY = 15 * 1000;  // 15 seconds
+const FWD_PAY_DELAY = 15 * 1000; // 15 seconds
+const STATUS_CHECKED_OUT = 0;
+const STATUS_CHECKED_IN = 1;
 
 let client;
 let payWallet;
@@ -30,13 +36,19 @@ let addressRecvAmtMap = new Map(); // Key: temporary receive address, Value: pay
 let temporaryAddressMap = new Map(); // Key: forward to receive address, Value: temporary receive address
 
 let server;
-let continueForwardingPayments = true;  // Use this flag to stop forwarding
+let continueForwardingPayments = true; // Use this flag to stop forwarding
 let forwardPaymentsTimeout;
+let payprocDb;
 
 // Configure and start server
 configure(runServer);
 
-
+/**
+ * Configures settings for payproc server.
+ * 
+ * @param  {function} Function to invoke after reading configuration.
+ *
+ */
 function configure(configReady) {
 
 
@@ -46,37 +58,61 @@ function configure(configReady) {
 			return false;
 		}
 
-    	configuration = JSON.parse(contents);
+		configuration = JSON.parse(contents);
 
-    	API_KEY = configuration.config.API_KEY;
-    	API_SECRET = configuration.config.API_SECRET;
-    	WALLET_NAME = configuration.config.WALLET_NAME;
-    	WALLET_PASSWORD = configuration.config.WALLET_PASSWORD;
-    	USE_TESTNET = configuration.config.USE_TESTNET;
-    	PORT = configuration.config.PORT;
+		API_KEY = configuration.config.API_KEY;
+		API_SECRET = configuration.config.API_SECRET;
+		WALLET_NAME = configuration.config.WALLET_NAME;
+		WALLET_PASSWORD = configuration.config.WALLET_PASSWORD;
+		USE_TESTNET = configuration.config.USE_TESTNET;
+		PORT = configuration.config.PORT;
+		DB_FILE = configuration.config.DB_FILE;
 
-    	configReady();
+		configReady();
 	});
 }
 
 function runServer() {
-	client = blocktrail.BlocktrailSDK( {
-		apiKey : API_KEY,
-		apiSecret : API_SECRET,
-		testnet : USE_TESTNET
+	client = blocktrail.BlocktrailSDK({
+		apiKey: API_KEY,
+		apiSecret: API_SECRET,
+		testnet: USE_TESTNET
 	});
 	client.initWallet(WALLET_NAME, WALLET_PASSWORD, setPayWallet);
+
+	// Setup database
+	dbSetup();
 
 	// Create a server
 	server = http.createServer(handleRequest);
 
 	// Lets start our server
-	server.listen(PORT, function(){
-	    console.log("Server listening on port, %s.", PORT);
+	server.listen(PORT, function() {
+		console.log("Server listening on port, %s.", PORT);
 	});
 
 	// Start funds forward process
 	forwardPaymentsTimeout = setTimeout(forwardPayments, FWD_PAY_DELAY);
+}
+
+function dbSetup() {
+	let fs = require("fs");
+	let exists = fs.existsSync(DB_FILE);
+
+	if (!exists) {
+		DB_FILE = "payproc.db";
+		console.log("Creating DB file, " + DB_FILE + ".");
+		fs.openSync(DB_FILE, "w");
+	}
+
+	let sqlite3 = require("sqlite3").verbose();
+	payprocDb = new sqlite3.Database(DB_FILE);
+
+	payprocDb.serialize(function() {
+		if (!exists) {
+			payprocDb.run("CREATE TABLE PaymentAddress (destinationAddress TEXT, paymentAddress TEXT, status INTEGER, targetUnconfBal INTEGER, targetBalance INTEGER)");
+		}
+	});
 }
 
 function setPayWallet(err, wallet) {
@@ -86,46 +122,46 @@ function setPayWallet(err, wallet) {
 		console.log('Wallet', WALLET_NAME, 'initialized.');
 	}
 	payWallet = wallet;
-	console.log("Wallet initialized.");	
+	console.log("Wallet initialized.");
 }
 
 function payWalletBalance(balanceCb) {
-    if (payWallet == undefined) {
-    	setTimeout(payWalletBalance, 250);
-    	return;
-    } 
+	if (payWallet === undefined) {
+		setTimeout(payWalletBalance, 250);
+		return;
+	}
 
 	payWallet.getBalance().then(function(balance) {
-	        console.log('Balance: ', blocktrail.toBTC(balance[0]));
-	        balanceCb(blocktrail.toBTC(balance[0]));
-	    },
-	    handleError);
-	
+			console.log('Balance: ', blocktrail.toBTC(balance[0]));
+			balanceCb(blocktrail.toBTC(balance[0]));
+		},
+		handleError);
+
 }
 
 
 function addressBalance(address, balanceCb) {
-	if (client == undefined) {
+	if (client === undefined) {
 		setTimeout(addressBalance(address, balanceCb), 250);
 	}
 
 	client.address(address).then(function(address) {
-		console.log("Balance:", address.balance);
-		balanceCb(address.balance);
-	},
-	handleError);
+			console.log("Balance:", address.balance);
+			balanceCb(address.balance);
+		},
+		handleError);
 }
 
 function addressUnconfirmedReceived(address, unconfRecvd) {
-	if (client == undefined) {
+	if (client === undefined) {
 		setTimeout(addressUnconfirmedReceived(address, unconfRecvd), 250);
 	}
 
 	client.address(address).then(function(address) {
-		console.log("Unconfirmed: ", address.unconfirmed_received);
-		unconfRecvd(address.unconfirmed_received);
-	},
-	handleError);
+			console.log("Unconfirmed: ", address.unconfirmed_received);
+			unconfRecvd(address.unconfirmed_received);
+		},
+		handleError);
 }
 
 function mapAddressForwarding(sourceAddress, destAddress) {
@@ -141,23 +177,59 @@ function mapTempAddressRecvAmount(tempAddress, amountSatoshis) {
 }
 
 function handleError(err) {
-    console.error(err);
+	console.error(err);
 }
 
 function receivePayment(recvAddress, amountBTC, addressCb) {
-	if (payWallet == undefined) {
-		setTimeout(receivePayment(recvAddress, amountBTC, tempAddress), 250);
+	if (payWallet === undefined) {
+		setTimeout(receivePayment(recvAddress, amountBTC, addressCb), 250);
 		return;
 	}
+    let amountSatoshis = blocktrail.toSatoshi(amountBTC);
 
-	payWallet.getNewAddress().then(function(address, path) {
-		console.log('new address', address);
-		mapAddressForwarding(address, recvAddress);
-		mapTemporaryAddress(recvAddress, address);
-		mapTempAddressRecvAmount(address, blocktrail.toSatoshi(amountBTC));
-		addressCb(address);
-	},
-	handleError);
+    // Attempt to retrieve temporary payment address from repository
+ 	retrieveNextPaymentAddress(recvAddress, amountSatoshis, addressCb);
+
+}
+
+// Parameters
+//     recvAddress    Bitcoin address of publisher (or final target)
+//     pymtAmt        Excepted payment amount in Satoshis
+//     pymtAddrCb     Callback function invoked with pymyAddrCb(pymtAddr)
+//     
+function retrieveNextPaymentAddress(recvAddress, pymtAmt, pymtAddrCb) {
+	let stmt = payprocDb.prepare("SELECT paymentAddress, targetUnconfBal, targetBalance FROM PaymentAddress WHERE destinationAddress = ? AND status = ?");
+
+	stmt.get(recvAddress, STATUS_CHECKED_IN, function(err, row) {
+		let pymtAddr;
+		let targetUnconfBal = 0;     // In Satoshis
+		let targetBal = 0;           // In Satoshis
+
+		// Handle no available payment address to use
+		if (row === undefined) {
+			payWallet.getNewAddress().then(function(address, path) {
+				console.log("Created new payment address, " + address + ".");
+				pymtAddr = address;
+				targetUnconfBal += pymtAmt;
+				targetBal += pymtAmt;
+				let insertStmt = payprocDb.prepare("INSERT INTO PaymentAddress (destinationAddress, paymentAddress, status, targetUnconfBal, targetBalance) VALUES (?, ?, ?, ?, ?)");
+				insertStmt.run(recvAddress, pymtAddr, STATUS_CHECKED_OUT, targetUnconfBal, targetBal);
+				insertStmt.finalize();
+
+			});
+		} else {
+			pymtAddr = row.paymentAddress;
+		}
+
+		pymtAddrCb(pymtAddr);
+	});
+	
+
+}
+
+function addNewPaymentAddress(recvAddress, pmtAddress, targetAmtBTC) {
+	let targetSatoshis = blocktrail.toSatoshi(targetAmtBTC);
+	let stmt = db.prepare("INSERT INTO PaymentAddress (destinationAddress, paymentAddress, status, targetUnconfBal, targetBalance) VALUES (recvAddress, pmtAddress, STATUS_CHECKED_IN, targetSatoshis)");
 }
 
 // TODO: Implement forward payments like https://gist.github.com/rubensayshi/35e45d4a843a8f9409e2
@@ -168,50 +240,80 @@ function forwardPayments() {
 		return false;
 	}
 
-	console.log("+++ Scanning payments to forward (TODO: Implement me!) +++");
 
-	forwardPaymentsTimeout = setTimeout(forwardPayments, FWD_PAY_DELAY)
+
+	forwardPaymentsTimeout = setTimeout(forwardPayments, FWD_PAY_DELAY);
 }
 
 // Main request handler
-function handleRequest(request, response){
+function handleRequest(request, response) {
 	console.log(request.url);
-	if (request.url.indexOf(URL_RECEIVE) == 0) {
+	if (request.url.indexOf(URL_RECEIVE) === 0) {
 		handleReceiveCreateAddress(request, response);
-	} else if (request.url.indexOf(URL_RECEIVED_BYADDRESS) == 0) {
+	} else if (request.url.indexOf(URL_RECEIVED_BYADDRESS) === 0) {
 		handleGetReceivedByAddress(request, response);
+	} else if (request.url.indexOf(URL_PING)) {
+		handlePing(request, response);
 	} else {
 		response.statusCode = 404;
 		response.statusMessage = "Not found";
 		response.end("Error");
 	}
-    
+
 }
 
 function handleReceiveCreateAddress(request, response) {
-    let query = request.url.substring(request.url.indexOf("?")+1);
-    let param = querystring.parse(query);
-    receivePayment(param.address, param.amount, function(tempAddress) {
-        var addressObject = { input_address: tempAddress[0] };
-        var jsonData = JSON.stringify(addressObject);
-        response.setHeader('Access-Control-Allow-Origin', '*');
-        response.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
-        response.setHeader('Content-Type', 'application/json');
-        response.statusCode = 200;
-        response.write(jsonData);
-        response.end();
-    });
+	let query = request.url.substring(request.url.indexOf("?") + 1);
+	let param = querystring.parse(query);
+	receivePayment(param.address, param.amount, function(tempAddress) {
+		var addressObject = {
+			input_address: tempAddress[0]
+		};
+		var jsonData = JSON.stringify(addressObject);
+		response.setHeader('Access-Control-Allow-Origin', '*');
+		response.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+		response.setHeader('Content-Type', 'application/json');
+		response.statusCode = 200;
+		response.write(jsonData);
+		response.end();
+	});
 
 }
 
 function handleGetReceivedByAddress(request, response) {
-	let recvAddress = request.url.substring(URL_RECEIVED_BYADDRESS.length+1);
+	let recvAddress = request.url.substring(URL_RECEIVED_BYADDRESS.length + 1);
 	addressUnconfirmedReceived(recvAddress, function(balanceSatoshis) {
-            console.log(balanceSatoshis);
-            response.setHeader('Access-Control-Allow-Origin', '*');
-            response.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
-            response.setHeader('Content-Type', 'text/plain');
-            response.statusCode = 200;
-            response.end(blocktrail.toBTC(balanceSatoshis));
-	}); 
+		console.log(balanceSatoshis);
+		response.setHeader('Access-Control-Allow-Origin', '*');
+		response.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+		response.setHeader('Content-Type', 'text/plain');
+		response.statusCode = 200;
+		response.end(blocktrail.toBTC(balanceSatoshis));
+	});
 }
+
+function handlePing(request, response) {
+	console.log("Received ping from " + request.socket.remoteAddress);
+		response.setHeader('Access-Control-Allow-Origin', '*');
+		response.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+		response.setHeader('Content-Type', 'text/plain');
+		response.statusCode = 200;
+		response.end("ALIVE");
+}
+
+/*
+Deprecated code - temporarily keep around for reference
+
+	payWallet.getNewAddress().then(function(address, path) {
+			console.log('new address', address);
+			mapAddressForwarding(address, recvAddress);
+			mapTemporaryAddress(recvAddress, address);
+			mapTempAddressRecvAmount(address, amountSatoshis);
+			addressCb(address);
+		},
+		handleError);
+
+
+
+
+ */

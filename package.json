@@ -18,6 +18,7 @@
   },
   "homepage": "https://github.com/dloa/paywall-web#readme",
   "dependencies": {
-    "blocktrail-sdk": "^2.0.0"
+    "blocktrail-sdk": "^2.0.0",
+    "sqlite3": "^3.1.4"
   }
 }
