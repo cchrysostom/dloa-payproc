@@ -20,14 +20,19 @@ let WALLET_PASSWORD = "";
 let USE_TESTNET = true;
 let PORT = 11306;
 let DB_FILE = "payproc.db";
+let FORWARD_BAL_THRESHOLD = 70000;    //TODO: Set this value to $0.50 worth of Satoshis, query market value
 
-const URL_RECEIVE = "/payproc/api/receive";
-const URL_RECEIVED_BYADDRESS = "/payproc/api/getreceivedbyaddress";
-const URL_PING = "/payproc/api/ping";
+let PYMT_ADDR_ROTATION_IMPLEMENTED = false;
 
-const FWD_PAY_DELAY = 15 * 1000; // 15 seconds
+const URL_RECEIVE = "/payproc/receive";
+const URL_RECEIVED_BYADDRESS = "/payproc/getreceivedbyaddress";
+const URL_PING = "/payproc/ping";
+
+const FWD_PAY_DELAY = 10 * 60 * 1000; // 10 minutes
 const STATUS_CHECKED_OUT = 0;
 const STATUS_CHECKED_IN = 1;
+const FORWARDED_FALSE = 0;
+const FORWARDED_TRUE = 1;
 
 let client;
 let payWallet;
@@ -67,6 +72,7 @@ function configure(configReady) {
 		USE_TESTNET = configuration.config.USE_TESTNET;
 		PORT = configuration.config.PORT;
 		DB_FILE = configuration.config.DB_FILE;
+        FORWARD_BAL_THRESHOLD = configuration.config.FORWARD_BAL_THRESHOLD;
 
 		configReady();
 	});
@@ -110,7 +116,7 @@ function dbSetup() {
 
 	payprocDb.serialize(function() {
 		if (!exists) {
-			payprocDb.run("CREATE TABLE PaymentAddress (destinationAddress TEXT, paymentAddress TEXT, status INTEGER, targetUnconfBal INTEGER, targetBalance INTEGER)");
+			payprocDb.run("CREATE TABLE PaymentAddress (destinationAddress TEXT, paymentAddress TEXT, targetBalance INTEGER, payableBalance INTEGER, status INTEGER, forwarded INTEGER)");
 		}
 	});
 }
@@ -196,40 +202,72 @@ function receivePayment(recvAddress, amountBTC, addressCb) {
 //     recvAddress    Bitcoin address of publisher (or final target)
 //     pymtAmt        Excepted payment amount in Satoshis
 //     pymtAddrCb     Callback function invoked with pymyAddrCb(pymtAddr)
-//     
+//
+//     TODO: Temporarily, payment addresses will be used only once. Thus, status will also be STATUS_CHECKED_OUT until implementation of
+//     rotating payment addresses is complete.     
 function retrieveNextPaymentAddress(recvAddress, pymtAmt, pymtAddrCb) {
-	let stmt = payprocDb.prepare("SELECT paymentAddress, targetUnconfBal, targetBalance FROM PaymentAddress WHERE destinationAddress = ? AND status = ?");
 
-	stmt.get(recvAddress, STATUS_CHECKED_IN, function(err, row) {
-		let pymtAddr;
-		let targetUnconfBal = 0;     // In Satoshis
-		let targetBal = 0;           // In Satoshis
 
-		// Handle no available payment address to use
-		if (row === undefined) {
+	if (PYMT_ADDR_ROTATION_IMPLEMENTED) {
+
+		let stmt = payprocDb.prepare("SELECT paymentAddress, targetBalance FROM PaymentAddress WHERE destinationAddress = ? AND status = ?");
+
+		stmt.get(recvAddress, STATUS_CHECKED_IN, function(err, row) {
+			let pymtAddr;
+			let targetBal = 0;           // In Satoshis
+
+			// Handle no available payment address to use
+			if (row === undefined) {
+				payWallet.getNewAddress().then(function(address, path) {
+					console.log("Created new payment address, " + address + ".");
+					pymtAddr = address;
+					targetBal += pymtAmt;
+					let insertStmt = payprocDb.prepare("INSERT INTO PaymentAddress (destinationAddress, paymentAddress, status, targetBalance, payableBalance, forwarded) VALUES (?, ?, ?, ?, ?, ?, ?)");
+					insertStmt.run(recvAddress, pymtAddr, STATUS_CHECKED_OUT, targetBal, pymtAmt, pymtAmt, FORWARDED_FALSE);
+					insertStmt.finalize();
+
+				});
+			} else {
+
+				pymtAddr = row.paymentAddress;
+
+				addressBalance(pymtAddr, function(confirmedBal) {
+					targetBal = confirmedBal;
+					targetBal += pymtAmt;
+
+					// TODO: Test whether this could setup a race condition, counting on Node.js serving http single threaded.
+					let updateStmt = payprocDb.prepare("UPDATE PaymentAddress SET status = ?, targetBalance = ? WHERE paymentAddress = ?");
+					updateStmt.run(STATUS_CHECKED_OUT, targetBal, pymtAddr);
+					updateStmt.finalize();
+				});
+				pymtAddrCb(pymtAddr);
+			}
+			
+		});
+
+	} else {
+
+			let pymtAddr;
+			let targetBal = 0;           // In Satoshis
+
 			payWallet.getNewAddress().then(function(address, path) {
 				console.log("Created new payment address, " + address + ".");
 				pymtAddr = address;
-				targetUnconfBal += pymtAmt;
 				targetBal += pymtAmt;
-				let insertStmt = payprocDb.prepare("INSERT INTO PaymentAddress (destinationAddress, paymentAddress, status, targetUnconfBal, targetBalance) VALUES (?, ?, ?, ?, ?)");
-				insertStmt.run(recvAddress, pymtAddr, STATUS_CHECKED_OUT, targetUnconfBal, targetBal);
+				let insertStmt = payprocDb.prepare("INSERT INTO PaymentAddress (destinationAddress, paymentAddress, status, targetBalance, payableBalance) VALUES (?, ?, ?, ?, ?, ?,?)");
+				insertStmt.run(recvAddress, pymtAddr, STATUS_CHECKED_OUT, targetBal, pymtAmt, pymtAmt, FORWARDED_FALSE);
 				insertStmt.finalize();
-
-			});
-		} else {
-			pymtAddr = row.paymentAddress;
-		}
-
-		pymtAddrCb(pymtAddr);
-	});
-	
+				pymtAddrCb(pymtAddr);
+			});	
+	}
 
 }
 
 function addNewPaymentAddress(recvAddress, pmtAddress, targetAmtBTC) {
 	let targetSatoshis = blocktrail.toSatoshi(targetAmtBTC);
-	let stmt = db.prepare("INSERT INTO PaymentAddress (destinationAddress, paymentAddress, status, targetUnconfBal, targetBalance) VALUES (recvAddress, pmtAddress, STATUS_CHECKED_IN, targetSatoshis)");
+	let stmt = db.prepare("INSERT INTO PaymentAddress (destinationAddress, paymentAddress, status, startUnconfBal, targetBalance) VALUES (?, ?, ?, ?, ?)");
+	stmt.run(recvAddress, pmtAddress, STATUS_CHECKED_IN, 0, targetSatoshis);
+	stmt.finalize();
 }
 
 // TODO: Implement forward payments like https://gist.github.com/rubensayshi/35e45d4a843a8f9409e2
@@ -240,6 +278,27 @@ function forwardPayments() {
 		return false;
 	}
 
+	/*
+	
+	for each destAddress
+
+		pymtRecvSum = 0
+
+		for each pymtAddr in destAddress
+			get pymtAddr.balance
+			if pymtAddr.balance >= payableBalance
+			    set payableBalance = 0
+			    set forwarded = FORWARDED_TRUE
+			    pymtRecvSum += pymtAddr.balance
+			else
+				set payableBalance =  (payableBalance - pymtAddr.balance <= 0) ? 0 : payableBalance - pymtAddr.balance
+
+			
+		if pymtRecvSum > FORWARD_BAL_THRESHOLD
+		    wallet.pay pymtRecvSum to destAddress
+
+
+	 */
 
 
 	forwardPaymentsTimeout = setTimeout(forwardPayments, FWD_PAY_DELAY);
