@@ -20,7 +20,7 @@ let WALLET_PASSWORD = "";
 let USE_TESTNET = true;
 let PORT = 11306;
 let DB_FILE = "payproc.db";
-let FORWARD_BAL_THRESHOLD = 70000;    //TODO: Set this value to $0.50 worth of Satoshis, query market value
+let FORWARD_BAL_THRESHOLD = 136000;    //TODO: Set this value to $1.00 worth of Satoshis, query market value
 
 let PYMT_ADDR_ROTATION_IMPLEMENTED = false;
 
@@ -265,7 +265,7 @@ function retrieveNextPaymentAddress(recvAddress, pymtAmt, pymtAddrCb) {
 
 function addNewPaymentAddress(recvAddress, pmtAddress, targetAmtBTC) {
 	let targetSatoshis = blocktrail.toSatoshi(targetAmtBTC);
-	let stmt = db.prepare("INSERT INTO PaymentAddress (destinationAddress, paymentAddress, status, startUnconfBal, targetBalance) VALUES (?, ?, ?, ?, ?)");
+	let stmt = payprocDb.prepare("INSERT INTO PaymentAddress (destinationAddress, paymentAddress, status, startUnconfBal, targetBalance) VALUES (?, ?, ?, ?, ?)");
 	stmt.run(recvAddress, pmtAddress, STATUS_CHECKED_IN, 0, targetSatoshis);
 	stmt.finalize();
 }
@@ -291,7 +291,7 @@ function forwardPayments() {
 			    set forwarded = FORWARDED_TRUE
 			    pymtRecvSum += pymtAddr.balance
 			else
-				set payableBalance =  (payableBalance - pymtAddr.balance <= 0) ? 0 : payableBalance - pymtAddr.balance
+				set payableBalance = payableBalance - pymtAddr.balance
 
 			
 		if pymtRecvSum > FORWARD_BAL_THRESHOLD
@@ -300,9 +300,58 @@ function forwardPayments() {
 
 	 */
 
+	 let destAddSelectSql = 'SELECT destinationAddress, paymentAddress, targetBalance, payableBalance, status' +
+	                        '    FROM PaymentAddress WHERE forwarded = ?' +
+	                        '    ORDER BY destinationAddress, paymentAddress';
+	 let destAddrSelect = payprocDb.prepare(destAddSelectSql);
+	 destAddrSelect.all(FORWARDED_TRUE, forwardDestAddresses);
+
 
 	forwardPaymentsTimeout = setTimeout(forwardPayments, FWD_PAY_DELAY);
 }
+
+
+function forwardDestAddresses(err, rows) {
+	let destAddrMap = new Map();
+
+    for (let i = 0; i < rows.length; i++) {
+      if (destAddrMap.get(rows[i].destinationAddress) === undefined) {
+        destAddrMap.set(rows[i].destinationAddress, new Map());
+      }
+      destAddrMap.get(rows[i].destinationAddress).set(rows[i].paymentAddress, rows[i]);
+    }
+
+    for (let destAddr of destAddrMap.keys()) {
+    	let pymtRecvSum = 0;
+    	
+    	for (let pymtAddr of destAddrMap.get(destAddr)) {
+    		addressBalance(pymtAddr, function(balance) {
+    			if (balance >= destAddrmap.get(pymtAddr).payableBalance) {
+    				payprocDb.prepare("UPDATE PaymentAddress SET payableBalance = ?, forwarded = ? WHERE paymentAddress = ?");
+    				payprocDb.run(0, FORWARDED_TRUE, pymtAddr);
+    				pymtRecvSum += balance;
+
+    			} else {
+    				let updatedPayableBal = destAddrMap.get(pymtAddr).payableBalance - balance;
+    				payprocDb.prepare("UPDATE PaymentAddress SET payableBalance = ? WHERE paymentAddress =?");
+    				payprocDb.run(updatedPayableBal, pymtAddr);
+    			}
+    		});
+    	}
+
+    	if (pymtRecvSum > FORWARD_BAL_THRESHOLD) {
+    		pay[destAddr] = pymtRecvSum;
+			payWallet.pay(pay, function(err, result) {
+				if (err) {
+                	console.log("Payment error:", err);
+                	return;
+            	}
+            	console.log('Forward payment transaction', result);				
+			});
+    	}
+    }
+}
+
 
 // Main request handler
 function handleRequest(request, response) {
