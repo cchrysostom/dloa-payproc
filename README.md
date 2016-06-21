@@ -5,7 +5,7 @@
 **Install dependencies**
 
 ```
-npm install blocktrail-sdk
+npm install
 ```
 
 **Copy the payproc.sample.conf file to payproc.conf and edit it.**
