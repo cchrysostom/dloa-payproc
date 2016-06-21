@@ -36,3 +36,11 @@ node_modules
 payproc.conf
 payproc.chris.conf
 payproc.btc.chris.conf
+
+# vi tmp files
+*.swp
+*~
+*.swo
+
+# Database files
+payproc.db

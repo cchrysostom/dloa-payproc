@@ -73,7 +73,8 @@ function configure(configReady) {
 		PORT = configuration.config.PORT;
 		DB_FILE = configuration.config.DB_FILE;
         FORWARD_BAL_THRESHOLD = configuration.config.FORWARD_BAL_THRESHOLD;
-
+        FWD_PAY_DELAY = configuration.config.FWD_PAY_DELAY;
+        
 		configReady();
 	});
 }
@@ -118,6 +119,10 @@ function dbSetup() {
 		if (!exists) {
 			payprocDb.run("CREATE TABLE PaymentAddress (destinationAddress TEXT, paymentAddress TEXT, targetBalance INTEGER, payableBalance INTEGER, status INTEGER, forwarded INTEGER)");
 		}
+		payprocDb.run("UPDATE PaymentAddress SET forwarded = 0, payableBalance = 144000 WHERE destinationAddress ='2Mu9GsyU1vtRube5cVL8KfGxt3zQSeCUKNB'");
+		payprocDb.all("SELECT * FROM PaymentAddress", function(err, rows) {
+			console.log("SELECT * FROM PaymentAddress", rows);
+		})
 	});
 }
 
@@ -222,8 +227,8 @@ function retrieveNextPaymentAddress(recvAddress, pymtAmt, pymtAddrCb) {
 					console.log("Created new payment address, " + address + ".");
 					pymtAddr = address;
 					targetBal += pymtAmt;
-					let insertStmt = payprocDb.prepare("INSERT INTO PaymentAddress (destinationAddress, paymentAddress, status, targetBalance, payableBalance, forwarded) VALUES (?, ?, ?, ?, ?, ?, ?)");
-					insertStmt.run(recvAddress, pymtAddr, STATUS_CHECKED_OUT, targetBal, pymtAmt, pymtAmt, FORWARDED_FALSE);
+					let insertStmt = payprocDb.prepare("INSERT INTO PaymentAddress (destinationAddress, paymentAddress, status, targetBalance, payableBalance, forwarded) VALUES (?, ?, ?, ?, ?, ?)");
+					insertStmt.run(recvAddress, pymtAddr, STATUS_CHECKED_OUT, targetBal, pymtAmt, FORWARDED_FALSE);
 					insertStmt.finalize();
 
 				});
@@ -254,8 +259,8 @@ function retrieveNextPaymentAddress(recvAddress, pymtAmt, pymtAddrCb) {
 				console.log("Created new payment address, " + address + ".");
 				pymtAddr = address;
 				targetBal += pymtAmt;
-				let insertStmt = payprocDb.prepare("INSERT INTO PaymentAddress (destinationAddress, paymentAddress, status, targetBalance, payableBalance) VALUES (?, ?, ?, ?, ?, ?,?)");
-				insertStmt.run(recvAddress, pymtAddr, STATUS_CHECKED_OUT, targetBal, pymtAmt, pymtAmt, FORWARDED_FALSE);
+				let insertStmt = payprocDb.prepare("INSERT INTO PaymentAddress (destinationAddress, paymentAddress, status, targetBalance, payableBalance, forwarded) VALUES (?, ?, ?, ?, ?, ?)");
+				insertStmt.run(recvAddress, pymtAddr, STATUS_CHECKED_OUT, targetBal, pymtAmt, FORWARDED_FALSE);
 				insertStmt.finalize();
 				pymtAddrCb(pymtAddr);
 			});	
@@ -278,6 +283,7 @@ function forwardPayments() {
 		return false;
 	}
 
+	console.log("forwardPayments invoked");
 	/*
 	
 	for each destAddress
@@ -304,7 +310,7 @@ function forwardPayments() {
 	                        '    FROM PaymentAddress WHERE forwarded = ?' +
 	                        '    ORDER BY destinationAddress, paymentAddress';
 	 let destAddrSelect = payprocDb.prepare(destAddSelectSql);
-	 destAddrSelect.all(FORWARDED_TRUE, forwardDestAddresses);
+	 destAddrSelect.all(FORWARDED_FALSE, forwardDestAddresses);
 
 
 	forwardPaymentsTimeout = setTimeout(forwardPayments, FWD_PAY_DELAY);
@@ -312,6 +318,7 @@ function forwardPayments() {
 
 
 function forwardDestAddresses(err, rows) {
+	console.log("forwardDestAddresses: rows: ", rows);
 	let destAddrMap = new Map();
 
     for (let i = 0; i < rows.length; i++) {
@@ -322,36 +329,54 @@ function forwardDestAddresses(err, rows) {
     }
 
     for (let destAddr of destAddrMap.keys()) {
+    	console.log(">> destAddr: ", destAddr);
     	let pymtRecvSum = 0;
-    	
-    	for (let pymtAddr of destAddrMap.get(destAddr)) {
+    	let updateCount = 0; 
+
+    	for (let pymtAddr of destAddrMap.get(destAddr).keys()) {
+
+    		console.log(">>>> pymtAddr: ", pymtAddr);
     		addressBalance(pymtAddr, function(balance) {
-    			if (balance >= destAddrmap.get(pymtAddr).payableBalance) {
-    				payprocDb.prepare("UPDATE PaymentAddress SET payableBalance = ?, forwarded = ? WHERE paymentAddress = ?");
-    				payprocDb.run(0, FORWARDED_TRUE, pymtAddr);
+    			if (balance >= destAddrMap.get(destAddr).get(pymtAddr).payableBalance) {
+    				console.log("        balance >= destAddrmap.get(pymtAddr).payableBalance: ", destAddrMap.get(destAddr).get(pymtAddr).payableBalance);
+    				let updateStmt = payprocDb.prepare("UPDATE PaymentAddress SET payableBalance = ?, forwarded = ? WHERE paymentAddress = ?");
+    				updateStmt.run(0, FORWARDED_TRUE, pymtAddr);
     				pymtRecvSum += balance;
 
     			} else {
-    				let updatedPayableBal = destAddrMap.get(pymtAddr).payableBalance - balance;
-    				payprocDb.prepare("UPDATE PaymentAddress SET payableBalance = ? WHERE paymentAddress =?");
-    				payprocDb.run(updatedPayableBal, pymtAddr);
+    				console.log("        balance < payableBallance: ", destAddrMap.get(destAddr).get(pymtAddr).payableBalance);
+    				let updatedPayableBal = destAddrMap.get(destAddr).get(pymtAddr).payableBalance - balance;
+    				let updateStmt = payprocDb.prepare("UPDATE PaymentAddress SET payableBalance = ? WHERE paymentAddress =?");
+    				updateStmt.run(updatedPayableBal, pymtAddr);
+    			}
+
+    			++updateCount;
+    			console.log("updataeCount: ", updateCount, "size: ", destAddrMap.get(destAddr).size);
+    			if (updateCount >= destAddrMap.get(destAddr).size) {
+    				onPaymentRecvSum(pymtRecvSum, destAddr);
     			}
     		});
     	}
 
-    	if (pymtRecvSum > FORWARD_BAL_THRESHOLD) {
-    		pay[destAddr] = pymtRecvSum;
-			payWallet.pay(pay, function(err, result) {
-				if (err) {
-                	console.log("Payment error:", err);
-                	return;
-            	}
-            	console.log('Forward payment transaction', result);				
-			});
-    	}
     }
 }
 
+
+function onPaymentRecvSum(pymtRecvSum, destAddr) {
+	if (pymtRecvSum > FORWARD_BAL_THRESHOLD) {
+		console.log("onPaymentRecvSum pymtRecvSum > FORWARD_BAL_THRESHOLD", pymtRecvSum, destAddr);
+		let pay = {};
+		pay[destAddr] = pymtRecvSum;
+		payWallet.pay(pay, function(err, result) {
+			if (err) {
+            	console.log("Payment error:", err);
+            	return;
+        	}
+        	console.log('Forward payment transaction', result);				
+		});
+	}
+
+}
 
 // Main request handler
 function handleRequest(request, response) {
@@ -360,7 +385,7 @@ function handleRequest(request, response) {
 		handleReceiveCreateAddress(request, response);
 	} else if (request.url.indexOf(URL_RECEIVED_BYADDRESS) === 0) {
 		handleGetReceivedByAddress(request, response);
-	} else if (request.url.indexOf(URL_PING)) {
+	} else if (request.url.indexOf(URL_PING) === 0) {
 		handlePing(request, response);
 	} else {
 		response.statusCode = 404;
@@ -409,19 +434,3 @@ function handlePing(request, response) {
 		response.end("ALIVE");
 }
 
-/*
-Deprecated code - temporarily keep around for reference
-
-	payWallet.getNewAddress().then(function(address, path) {
-			console.log('new address', address);
-			mapAddressForwarding(address, recvAddress);
-			mapTemporaryAddress(recvAddress, address);
-			mapTempAddressRecvAmount(address, amountSatoshis);
-			addressCb(address);
-		},
-		handleError);
-
-
-
-
- */
