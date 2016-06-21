@@ -119,7 +119,6 @@ function dbSetup() {
 		if (!exists) {
 			payprocDb.run("CREATE TABLE PaymentAddress (destinationAddress TEXT, paymentAddress TEXT, targetBalance INTEGER, payableBalance INTEGER, status INTEGER, forwarded INTEGER)");
 		}
-		payprocDb.run("UPDATE PaymentAddress SET forwarded = 0, payableBalance = 144000 WHERE destinationAddress ='2Mu9GsyU1vtRube5cVL8KfGxt3zQSeCUKNB'");
 		payprocDb.all("SELECT * FROM PaymentAddress", function(err, rows) {
 			console.log("SELECT * FROM PaymentAddress", rows);
 		})
@@ -225,7 +224,7 @@ function retrieveNextPaymentAddress(recvAddress, pymtAmt, pymtAddrCb) {
 			if (row === undefined) {
 				payWallet.getNewAddress().then(function(address, path) {
 					console.log("Created new payment address, " + address + ".");
-					pymtAddr = address;
+					pymtAddr = address[0];
 					targetBal += pymtAmt;
 					let insertStmt = payprocDb.prepare("INSERT INTO PaymentAddress (destinationAddress, paymentAddress, status, targetBalance, payableBalance, forwarded) VALUES (?, ?, ?, ?, ?, ?)");
 					insertStmt.run(recvAddress, pymtAddr, STATUS_CHECKED_OUT, targetBal, pymtAmt, FORWARDED_FALSE);
@@ -245,7 +244,7 @@ function retrieveNextPaymentAddress(recvAddress, pymtAmt, pymtAddrCb) {
 					updateStmt.run(STATUS_CHECKED_OUT, targetBal, pymtAddr);
 					updateStmt.finalize();
 				});
-				pymtAddrCb(pymtAddr);
+				pymtAddrCb([pymtAddr]);
 			}
 			
 		});
@@ -257,12 +256,12 @@ function retrieveNextPaymentAddress(recvAddress, pymtAmt, pymtAddrCb) {
 
 			payWallet.getNewAddress().then(function(address, path) {
 				console.log("Created new payment address, " + address + ".");
-				pymtAddr = address;
+				pymtAddr = address[0];
 				targetBal += pymtAmt;
 				let insertStmt = payprocDb.prepare("INSERT INTO PaymentAddress (destinationAddress, paymentAddress, status, targetBalance, payableBalance, forwarded) VALUES (?, ?, ?, ?, ?, ?)");
 				insertStmt.run(recvAddress, pymtAddr, STATUS_CHECKED_OUT, targetBal, pymtAmt, FORWARDED_FALSE);
 				insertStmt.finalize();
-				pymtAddrCb(pymtAddr);
+				pymtAddrCb(address);
 			});	
 	}
 
