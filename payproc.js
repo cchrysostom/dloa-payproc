@@ -28,7 +28,7 @@ const URL_RECEIVE = "/payproc/receive";
 const URL_RECEIVED_BYADDRESS = "/payproc/getreceivedbyaddress";
 const URL_PING = "/payproc/ping";
 
-const FWD_PAY_DELAY = 10 * 60 * 1000; // 10 minutes
+let FWD_PAY_DELAY = 10 * 60 * 1000; // 10 minutes
 const STATUS_CHECKED_OUT = 0;
 const STATUS_CHECKED_IN = 1;
 const FORWARDED_FALSE = 0;
