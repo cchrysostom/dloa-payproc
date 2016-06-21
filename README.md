@@ -77,4 +77,16 @@ Return:
 
 The unconfirmed balance in BTC.
 
-###
+### /payproc/ping
+
+To check whether the service is alive or not.
+
+```
+$ curl "http://localhost:11306/payproc/ping"
+ALIVE
+```
+
+Return:
+
+**ALIVE** Payproc is alive
+
