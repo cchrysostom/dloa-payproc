@@ -403,7 +403,6 @@ function handleReceiveCreateAddress(request, response) {
 			input_address: tempAddress[0]
 		};
 		var jsonData = JSON.stringify(addressObject);
-		response.setHeader('Access-Control-Allow-Origin', '*');
 		response.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
 		response.setHeader('Content-Type', 'application/json');
 		response.statusCode = 200;
@@ -417,7 +416,6 @@ function handleGetReceivedByAddress(request, response) {
 	let recvAddress = request.url.substring(URL_RECEIVED_BYADDRESS.length + 1);
 	addressUnconfirmedReceived(recvAddress, function(balanceSatoshis) {
 		console.log(balanceSatoshis);
-		response.setHeader('Access-Control-Allow-Origin', '*');
 		response.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
 		response.setHeader('Content-Type', 'text/plain');
 		response.statusCode = 200;
@@ -427,7 +425,6 @@ function handleGetReceivedByAddress(request, response) {
 
 function handlePing(request, response) {
 	console.log("Received ping from " + request.socket.remoteAddress);
-		response.setHeader('Access-Control-Allow-Origin', '*');
 		response.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
 		response.setHeader('Content-Type', 'text/plain');
 		response.statusCode = 200;
