@@ -35,3 +35,12 @@ node_modules
 # Personal configuration
 payproc.conf
 payproc.chris.conf
+payproc.btc.chris.conf
+
+# vi tmp files
+*.swp
+*~
+*.swo
+
+# Database files
+payproc.db
