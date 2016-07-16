@@ -11,6 +11,7 @@ let blocktrail = require('blocktrail-sdk');
 let http = require('http');
 let querystring = require('querystring');
 let fs = require('fs');
+let winston = require('winston');
 
 let configuration;
 let API_KEY = "";
@@ -45,6 +46,14 @@ let continueForwardingPayments = true; // Use this flag to stop forwarding
 let forwardPaymentsTimeout;
 let payprocDb;
 
+let logger = new (winston.Logger)({
+    transports: [
+      new (winston.transports.Console)({ colorize: true , timestamp: true}),
+      new (winston.transports.File)({ name: 'info-log', filename: 'payproc.log', timestamp: true, level: 'info', maxsize: 26214400, maxFiles: 5 }),
+      new (winston.transports.File)({ name: 'debug-log', filename: 'payproc.debug.log', timestamp: true, level: 'debug', maxsize: 26214400, maxFiles: 5 })
+    ]
+  });
+
 // Configure and start server
 configure(runServer);
 
@@ -56,10 +65,10 @@ configure(runServer);
  */
 function configure(configReady) {
 
-
+	logger.debug('Configuring payproc.');
 	fs.readFile('payproc.conf', 'utf8', function(err, contents) {
 		if (err) {
-			console.error(err);
+			logger.error(err);
 			return false;
 		}
 
@@ -95,7 +104,7 @@ function runServer() {
 
 	// Lets start our server
 	server.listen(PORT, function() {
-		console.log("Server listening on port, %s.", PORT);
+		logger.info("Server listening on port, %s.", PORT);
 	});
 
 	// Start funds forward process
@@ -108,7 +117,7 @@ function dbSetup() {
 
 	if (!exists) {
 		DB_FILE = "payproc.db";
-		console.log("Creating DB file, " + DB_FILE + ".");
+		logger.debug("Creating DB file, %s.", DB_FILE);
 		fs.openSync(DB_FILE, "w");
 	}
 
@@ -120,19 +129,19 @@ function dbSetup() {
 			payprocDb.run("CREATE TABLE PaymentAddress (destinationAddress TEXT, paymentAddress TEXT, targetBalance INTEGER, payableBalance INTEGER, status INTEGER, forwarded INTEGER)");
 		}
 		payprocDb.all("SELECT * FROM PaymentAddress", function(err, rows) {
-			console.log("SELECT * FROM PaymentAddress", rows);
+			logger.debug("SELECT * FROM PaymentAddress", rows);
 		})
 	});
 }
 
 function setPayWallet(err, wallet) {
 	if (err) {
-		return console.log('initWallet ERR', err);
+		return logger.error('initWallet ERR', err);
 	} else {
-		console.log('Wallet', WALLET_NAME, 'initialized.');
+		logger.info('Wallet, %s, initialized.', WALLET_NAME);
 	}
 	payWallet = wallet;
-	console.log("Wallet initialized.");
+	logger.debug("Wallet initialized.");
 }
 
 function payWalletBalance(balanceCb) {
@@ -142,7 +151,7 @@ function payWalletBalance(balanceCb) {
 	}
 
 	payWallet.getBalance().then(function(balance) {
-			console.log('Balance: ', blocktrail.toBTC(balance[0]));
+			logger.debug('Balance: ', blocktrail.toBTC(balance[0]));
 			balanceCb(blocktrail.toBTC(balance[0]));
 		},
 		handleError);
@@ -156,7 +165,7 @@ function addressBalance(address, balanceCb) {
 	}
 
 	client.address(address).then(function(address) {
-			console.log("Balance:", address.balance);
+			logger.debug("Address: ", address, ", Balance: ", address.balance);
 			balanceCb(address.balance);
 		},
 		handleError);
@@ -168,7 +177,7 @@ function addressUnconfirmedReceived(address, unconfRecvd) {
 	}
 
 	client.address(address).then(function(address) {
-			console.log("Unconfirmed: ", address.unconfirmed_received);
+			logger.debug("Address: ", address, ", Unconfirmed: ", address.unconfirmed_received);
 			unconfRecvd(address.unconfirmed_received);
 		},
 		handleError);
@@ -223,7 +232,7 @@ function retrieveNextPaymentAddress(recvAddress, pymtAmt, pymtAddrCb) {
 			// Handle no available payment address to use
 			if (row === undefined) {
 				payWallet.getNewAddress().then(function(address, path) {
-					console.log("Created new payment address, " + address + ".");
+					logger.info("Created new payment address, " + address + ".");
 					pymtAddr = address[0];
 					targetBal += pymtAmt;
 					let insertStmt = payprocDb.prepare("INSERT INTO PaymentAddress (destinationAddress, paymentAddress, status, targetBalance, payableBalance, forwarded) VALUES (?, ?, ?, ?, ?, ?)");
@@ -244,7 +253,7 @@ function retrieveNextPaymentAddress(recvAddress, pymtAmt, pymtAddrCb) {
 					updateStmt.run(STATUS_CHECKED_OUT, targetBal, pymtAddr);
 					updateStmt.finalize();
 				});
-				pymtAddrCb([pymtAddr]);
+				pymtAddrCb(pymtAddr);
 			}
 			
 		});
@@ -255,7 +264,7 @@ function retrieveNextPaymentAddress(recvAddress, pymtAmt, pymtAddrCb) {
 			let targetBal = 0;           // In Satoshis
 
 			payWallet.getNewAddress().then(function(address, path) {
-				console.log("Created new payment address, " + address + ".");
+				logger.info("Created new payment address, " + address + ".");
 				pymtAddr = address[0];
 				targetBal += pymtAmt;
 				let insertStmt = payprocDb.prepare("INSERT INTO PaymentAddress (destinationAddress, paymentAddress, status, targetBalance, payableBalance, forwarded) VALUES (?, ?, ?, ?, ?, ?)");
@@ -282,7 +291,7 @@ function forwardPayments() {
 		return false;
 	}
 
-	console.log("forwardPayments invoked");
+	logger.info("forwardPayments invoked");
 	/*
 	
 	for each destAddress
@@ -317,7 +326,7 @@ function forwardPayments() {
 
 
 function forwardDestAddresses(err, rows) {
-	console.log("forwardDestAddresses: rows: ", rows);
+	logger.debug("forwardDestAddresses: rows: ", rows);
 	let destAddrMap = new Map();
 
     for (let i = 0; i < rows.length; i++) {
@@ -328,29 +337,28 @@ function forwardDestAddresses(err, rows) {
     }
 
     for (let destAddr of destAddrMap.keys()) {
-    	console.log(">> destAddr: ", destAddr);
     	let pymtRecvSum = 0;
     	let updateCount = 0; 
 
     	for (let pymtAddr of destAddrMap.get(destAddr).keys()) {
 
-    		console.log(">>>> pymtAddr: ", pymtAddr);
+    		logger.info(">>>> destAddr: " + destAddr + ", pymtAddr: " + pymtAddr);
     		addressBalance(pymtAddr, function(balance) {
     			if (balance >= destAddrMap.get(destAddr).get(pymtAddr).payableBalance) {
-    				console.log("        balance >= destAddrmap.get(pymtAddr).payableBalance: ", destAddrMap.get(destAddr).get(pymtAddr).payableBalance);
+    				logger.info("Payment address, " + pymtAddr + ", balance >= destAddrmap.get(pymtAddr).payableBalance: " + destAddrMap.get(destAddr).get(pymtAddr).payableBalance);
     				let updateStmt = payprocDb.prepare("UPDATE PaymentAddress SET payableBalance = ?, forwarded = ? WHERE paymentAddress = ?");
     				updateStmt.run(0, FORWARDED_TRUE, pymtAddr);
     				pymtRecvSum += balance;
 
     			} else {
-    				console.log("        balance < payableBallance: ", destAddrMap.get(destAddr).get(pymtAddr).payableBalance);
+    				logger.debug("Payment address," + pymtAddr + " balance < payableBallance: " + destAddrMap.get(destAddr).get(pymtAddr).payableBalance);
     				let updatedPayableBal = destAddrMap.get(destAddr).get(pymtAddr).payableBalance - balance;
     				let updateStmt = payprocDb.prepare("UPDATE PaymentAddress SET payableBalance = ? WHERE paymentAddress =?");
     				updateStmt.run(updatedPayableBal, pymtAddr);
     			}
 
     			++updateCount;
-    			console.log("updataeCount: ", updateCount, "size: ", destAddrMap.get(destAddr).size);
+    			logger.debug("updataeCount: ", updateCount, "size: ", destAddrMap.get(destAddr).size);
     			if (updateCount >= destAddrMap.get(destAddr).size) {
     				onPaymentRecvSum(pymtRecvSum, destAddr);
     			}
@@ -363,15 +371,15 @@ function forwardDestAddresses(err, rows) {
 
 function onPaymentRecvSum(pymtRecvSum, destAddr) {
 	if (pymtRecvSum > FORWARD_BAL_THRESHOLD) {
-		console.log("onPaymentRecvSum pymtRecvSum > FORWARD_BAL_THRESHOLD", pymtRecvSum, destAddr);
+		logger.info("onPaymentRecvSum pymtRecvSum > FORWARD_BAL_THRESHOLD " + pymtRecvSum + " for address " + destAddr);
 		let pay = {};
 		pay[destAddr] = pymtRecvSum;
 		payWallet.pay(pay, function(err, result) {
 			if (err) {
-            	console.log("Payment error:", err);
+            	logger.error("Payment error: " + err);
             	return;
         	}
-        	console.log('Forward payment transaction', result);				
+        	logger.info("Forward payment transaction " + result);				
 		});
 	}
 
@@ -379,7 +387,7 @@ function onPaymentRecvSum(pymtRecvSum, destAddr) {
 
 // Main request handler
 function handleRequest(request, response) {
-	console.log(request.url);
+	logger.info("Received request, " + request.url);
 	if (request.url.indexOf(URL_RECEIVE) === 0) {
 		handleReceiveCreateAddress(request, response);
 	} else if (request.url.indexOf(URL_RECEIVED_BYADDRESS) === 0) {
@@ -391,7 +399,6 @@ function handleRequest(request, response) {
 		response.statusMessage = "Not found";
 		response.end("Error");
 	}
-
 }
 
 function handleReceiveCreateAddress(request, response) {
@@ -414,7 +421,7 @@ function handleReceiveCreateAddress(request, response) {
 function handleGetReceivedByAddress(request, response) {
 	let recvAddress = request.url.substring(URL_RECEIVED_BYADDRESS.length + 1);
 	addressUnconfirmedReceived(recvAddress, function(balanceSatoshis) {
-		console.log(balanceSatoshis);
+		logger.debug("handleGetReceivedByAddress   Address: " + recvAddress + ", Unconfimed balance (Satoshis): " + balanceSatoshis);
 		response.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
 		response.setHeader('Content-Type', 'text/plain');
 		response.statusCode = 200;
@@ -423,10 +430,10 @@ function handleGetReceivedByAddress(request, response) {
 }
 
 function handlePing(request, response) {
-	console.log("Received ping from " + request.socket.remoteAddress);
-		response.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
-		response.setHeader('Content-Type', 'text/plain');
-		response.statusCode = 200;
-		response.end("ALIVE");
+	logger.info("Received ping from " + request.socket.remoteAddress);
+	response.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+	response.setHeader('Content-Type', 'text/plain');
+	response.statusCode = 200;
+	response.end("ALIVE");
 }
 
