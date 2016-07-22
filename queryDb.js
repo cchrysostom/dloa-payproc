@@ -21,8 +21,10 @@ function queryPaymentAddress() {
 		if (!exists) {
 			payprocDb.run("CREATE TABLE PaymentAddress (destinationAddress TEXT, paymentAddress TEXT, targetBalance INTEGER, payableBalance INTEGER, status INTEGER, forwarded INTEGER)");
 		}
-		payprocDb.all("SELECT * FROM PaymentAddress", function(err, rows) {
-			console.log("SELECT * FROM PaymentAddress", rows);
-		})
+		console.log("destinationAddress\tpaymentAddress\ttargetBalance\tpayableBalance\tstatus\tforwarded");
+		payprocDb.each("SELECT * FROM PaymentAddress", function(err, row) {
+			console.log(row.destinationAddress + "\t" + row.paymentAddress + "\t" + row.targetBalance + "\t" + row.payableBalance + "\t" + row.status + "\t" + row.forwarded);
+		});
+
 	});
 }

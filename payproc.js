@@ -22,6 +22,7 @@ let USE_TESTNET = true;
 let PORT = 11306;
 let DB_FILE = "payproc.db";
 let FORWARD_BAL_THRESHOLD = 136000;    //TODO: Set this value to $1.00 worth of Satoshis, query market value
+let IGNORE_FORWARDED_FLAG = false;
 
 let PYMT_ADDR_ROTATION_IMPLEMENTED = false;
 
@@ -83,6 +84,7 @@ function configure(configReady) {
 		DB_FILE = configuration.config.DB_FILE;
         FORWARD_BAL_THRESHOLD = configuration.config.FORWARD_BAL_THRESHOLD;
         FWD_PAY_DELAY = configuration.config.FWD_PAY_DELAY;
+		IGNORE_FORWARDED_FLAG = configuration.config.IGNORE_FORWARDED_FLAG;
         
 		configReady();
 	});
@@ -128,9 +130,6 @@ function dbSetup() {
 		if (!exists) {
 			payprocDb.run("CREATE TABLE PaymentAddress (destinationAddress TEXT, paymentAddress TEXT, targetBalance INTEGER, payableBalance INTEGER, status INTEGER, forwarded INTEGER)");
 		}
-		payprocDb.all("SELECT * FROM PaymentAddress", function(err, rows) {
-			logger.debug("SELECT * FROM PaymentAddress", rows);
-		})
 	});
 }
 
@@ -314,18 +313,31 @@ function forwardPayments() {
 
 	 */
 
-	 let destAddSelectSql = 'SELECT destinationAddress, paymentAddress, targetBalance, payableBalance, status' +
-	                        '    FROM PaymentAddress WHERE forwarded = ?' +
-	                        '    ORDER BY destinationAddress, paymentAddress';
+	 let destAddSelectSql = 'SELECT destinationAddress, paymentAddress, targetBalance, payableBalance, status FROM PaymentAddress ';
+	 if (!IGNORE_FORWARDED_FLAG) {
+		 destAddSelectSql += ' WHERE forwarded = ?';
+	 }
+     destAddSelectSql += '    ORDER BY destinationAddress, paymentAddress';
+
 	 let destAddrSelect = payprocDb.prepare(destAddSelectSql);
-	 destAddrSelect.all(FORWARDED_FALSE, forwardDestAddresses);
 
+	 if (!IGNORE_FORWARDED_FLAG) {
+		destAddrSelect.all(FORWARDED_FALSE, forwardDestAddresses);
+	 } else {
+		destAddrSelect.all([], forwardDestAddresses); 
+	 }
+	 
 
-	forwardPaymentsTimeout = setTimeout(forwardPayments, FWD_PAY_DELAY);
+	 forwardPaymentsTimeout = setTimeout(forwardPayments, FWD_PAY_DELAY);
 }
 
 
 function forwardDestAddresses(err, rows) {
+	if (err) {
+		logger.error("Failed to forward to destination address. ", err);
+		return;
+	}
+
 	logger.debug("forwardDestAddresses: rows: ", rows);
 	let destAddrMap = new Map();
 
@@ -346,8 +358,6 @@ function forwardDestAddresses(err, rows) {
     		addressBalance(pymtAddr, function(balance) {
     			if (balance >= destAddrMap.get(destAddr).get(pymtAddr).payableBalance) {
     				logger.info("Payment address, " + pymtAddr + ", balance >= destAddrmap.get(pymtAddr).payableBalance: " + destAddrMap.get(destAddr).get(pymtAddr).payableBalance);
-    				let updateStmt = payprocDb.prepare("UPDATE PaymentAddress SET payableBalance = ?, forwarded = ? WHERE paymentAddress = ?");
-    				updateStmt.run(0, FORWARDED_TRUE, pymtAddr);
     				pymtRecvSum += balance;
 
     			} else {
@@ -360,7 +370,7 @@ function forwardDestAddresses(err, rows) {
     			++updateCount;
     			logger.debug("updataeCount: ", updateCount, "size: ", destAddrMap.get(destAddr).size);
     			if (updateCount >= destAddrMap.get(destAddr).size) {
-    				onPaymentRecvSum(pymtRecvSum, destAddr);
+    				onPaymentRecvSum(pymtRecvSum, destAddr, destAddrMap.get(destAddr));
     			}
     		});
     	}
@@ -369,20 +379,49 @@ function forwardDestAddresses(err, rows) {
 }
 
 
-function onPaymentRecvSum(pymtRecvSum, destAddr) {
-	if (pymtRecvSum > FORWARD_BAL_THRESHOLD) {
-		logger.info("onPaymentRecvSum pymtRecvSum > FORWARD_BAL_THRESHOLD " + pymtRecvSum + " for address " + destAddr);
-		let pay = {};
-		pay[destAddr] = pymtRecvSum;
-		payWallet.pay(pay, function(err, result) {
-			if (err) {
-            	logger.error("Payment error: " + err);
-            	return;
-        	}
-        	logger.info("Forward payment transaction " + result);				
-		});
+function onPaymentRecvSum(pymtRecvSum, destAddr, pymtAddrMap) {
+    if (pymtRecvsum < FORWARD_BAL_THRESHOLD) {
+		return;
 	}
 
+	logger.info("onPaymentRecvSum pymtRecvSum, " + pymtRecvSum + ", for address, " + destAddr + ".");
+	let pay = {};
+	pay[destAddr] = pymtRecvSum;
+
+	payWallet.pay(pay, function(err, result) {
+		if (err) {
+			logger.error("Payment error: " + err);
+			return;
+		}
+		logger.info("Forward payment transaction " + result);
+
+		// TODO: For performance, use UPDATE WHERE IN (...) if the IN clause doesn't exceed sqlite3 limits
+		let stmtArgs = [];
+		stmtArgs.push(0);    // payableBalance
+		stmtArgs.push(FORWARDED_TRUE);    // forwarded
+		let updStmtString = "UPDATE PaymentAddress SET payableBalance = ?, forwarded = ? WHERE paymentAddress IN (";
+
+		let keyCount = 0;
+		for (let pymtAddr of pymtAddrMap.keys()) {
+			if (keyCount > 0) {
+				updStmtString += ",";
+			}
+			updStmtString += "?";
+			stmtArgs.push(pymtAddr);
+			keyCount++;
+		}
+		updStmtString += ")";
+
+		logger.debug(updStmtString);
+		let updateStmt = payprocDb.prepare(updStmtString);
+		updateStmt.run(stmtArgs, function(stmtErr) {
+			if (stmtErr) {
+				logger.error("Failed to update payment address ledger.");
+			}
+			logger.debug("Payment address ledger updated. LastID: "  + this.lastID + ", changes: " + this.changes + ".");
+			logger.info("Payment, " + pymtRecvSum, ", forwarded to " + destAddr + ".");
+		});
+	});
 }
 
 // Main request handler
