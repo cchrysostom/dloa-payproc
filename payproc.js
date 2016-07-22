@@ -320,7 +320,13 @@ function forwardPayments() {
      destAddSelectSql += '    ORDER BY destinationAddress, paymentAddress';
 
 	 let destAddrSelect = payprocDb.prepare(destAddSelectSql);
-	 destAddrSelect.all(FORWARDED_FALSE, forwardDestAddresses);
+
+	 if (!IGNORE_FORWARDED_FLAG) {
+		destAddrSelect.all(FORWARDED_FALSE, forwardDestAddresses);
+	 } else {
+		destAddrSelect.all([], forwardDestAddresses); 
+	 }
+	 
 
 	 forwardPaymentsTimeout = setTimeout(forwardPayments, FWD_PAY_DELAY);
 }
