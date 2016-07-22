@@ -327,6 +327,11 @@ function forwardPayments() {
 
 
 function forwardDestAddresses(err, rows) {
+	if (err) {
+		logger.error("Failed to forward to destination address. ", err);
+		return;
+	}
+
 	logger.debug("forwardDestAddresses: rows: ", rows);
 	let destAddrMap = new Map();
 
