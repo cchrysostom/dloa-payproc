@@ -42,7 +42,7 @@ let addressRecvAmtMap = new Map(); // Key: temporary receive address, Value: pay
 let temporaryAddressMap = new Map(); // Key: forward to receive address, Value: temporary receive address
 
 let server;
-let continueForwardingPayments = true; // Use this flag to stop forwarding
+let continueForwardingPayments = false; // Use this flag to stop forwarding
 let forwardPaymentsTimeout;
 let payprocDb;
 
@@ -108,7 +108,8 @@ function runServer() {
 	});
 
 	// Start funds forward process
-	forwardPaymentsTimeout = setTimeout(forwardPayments, FWD_PAY_DELAY);
+	// Disabled temporarily, issue #10
+	//forwardPaymentsTimeout = setTimeout(forwardPayments, FWD_PAY_DELAY);
 }
 
 function dbSetup() {
@@ -341,7 +342,7 @@ function forwardDestAddresses(err, rows) {
     	let updateCount = 0; 
 
     	for (let pymtAddr of destAddrMap.get(destAddr).keys()) {
-
+			// Async / await here
     		logger.info(">>>> destAddr: " + destAddr + ", pymtAddr: " + pymtAddr);
     		addressBalance(pymtAddr, function(balance) {
     			if (balance >= destAddrMap.get(destAddr).get(pymtAddr).payableBalance) {
